@@ -28,7 +28,7 @@
 #
 #   Notice: only frame 0 props will affect Y4M header.
 
-from vapoursynth import core, VideoNode, VideoFrame # not really used, but I might use tham in future
+from vapoursynth import core, VideoNode, VideoFrame # not really used, but I might use them in future
 import socket
 import sys
 import os
