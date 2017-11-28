@@ -148,7 +148,8 @@ class TCPClipServer():
                             major = TCPClipVersion.Major, 
                             minor = TCPClipVersion.Minor
                         ), 
-                    -1)
+                        -1
+                    )
                 )
             elif qtype == TCPClipAction.Close:
                 self.helper.send(
