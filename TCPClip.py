@@ -279,14 +279,20 @@ class TCPClipClient():
         )
 
     def GetCSP(self, name, num_planes): # need to write better validation on non-YUV formats, I don't support it
-        if num_planes is 3:
+        if num_planes == 3:
             matched = re.findall('YUV(\d+)P(\d+)', name)
+            if not matched:
+                print('Received frame has 3 planes, but they are in non-YUV format. Not supported.')
             csp, bits = matched[0]
             return 'C{}p{}'.format(csp, bits)
-        else:
+        elif num_planes == 1:
             matched = re.findall('GRAY(\d+)', name)
+            if not matched:
+                print('Received frame has 1 plane, but it is in non-GRAY format. Not supported.')
             bits = matched[0]
             return 'Cmono{}'.format(bits)
+        else:
+            print('Received frame has {} planes. Not supported.'.format(num_planes))
 
     def SigIntHandler(self, *args):
         self.Exit()
