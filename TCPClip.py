@@ -361,6 +361,6 @@ class TCPClipClient():
             for plane in frameData:
                 sys.stdout.buffer.write(plane)
             if self.verbose:
-                sys.stderr.write('Current frame: {i} \r'.format(i=frameNumber))
+                 sys.stderr.write('Progress: {i}/{all}\r'.format(i=frameNumber, all=headerInfo['num_frames']))
 
         self.Exit()
