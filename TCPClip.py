@@ -113,7 +113,7 @@ class TCPClipServer():
             sys.exit()
 
         self.soc.listen(2)
-        print ('Socket is now listening.')
+        print ('Listening the socket.')
 
         while True:
             self.conn, addr = self.soc.accept()
@@ -124,7 +124,7 @@ class TCPClipServer():
                 Thread(target=self.ServerLoop, args=(ip, port)).start()
 
             except:
-                print ('Terible error!')
+                print ('Terrible error!')
                 traceback.print_exc()
 
         self.soc.close()
@@ -148,21 +148,22 @@ class TCPClipServer():
                             major = TCPClipVersion.Major, 
                             minor = TCPClipVersion.Minor
                         ), 
-                    -1)
+                        -1
+                    )
                 )
             elif qtype == TCPClipAction.Close:
                 self.helper.send(
                     pickle.dumps('close', -1)
                 )
                 self.conn.close()
-                print ('Connection {}:{} ended.'.format(ip, port))
+                print ('Connection {}:{} closed.'.format(ip, port))
                 break
             elif qtype == TCPClipAction.Exit:
                 self.helper.send(
                     pickle.dumps('exit', -1)
                 )
                 self.conn.close()
-                print ('Connection {}:{} ended. Process will exit.'.format(ip, port))
+                print ('Connection {}:{} closed. Exiting, as client asked.'.format(ip, port))
                 os._exit(0)
                 break
             elif qtype == TCPClipAction.Header:
@@ -171,7 +172,7 @@ class TCPClipServer():
                 self.GetFrame(query['frame'])
             else:
                 self.conn.close()
-                print ('Connection {}:{} ended.'.format(ip, port))
+                print ('Received query has unknown type. Connection {}:{} closed.'.format(ip, port))
                 break
 
     def GetMeta(self):
@@ -278,14 +279,20 @@ class TCPClipClient():
         )
 
     def GetCSP(self, name, num_planes): # need to write better validation on non-YUV formats, I don't support it
-        if num_planes is 3:
+        if num_planes == 3:
             matched = re.findall('YUV(\d+)P(\d+)', name)
+            if not matched:
+                print('Received frame has 3 planes, but they are in non-YUV format. Not supported.')
             csp, bits = matched[0]
             return 'C{}p{}'.format(csp, bits)
-        else:
+        elif num_planes == 1:
             matched = re.findall('GRAY(\d+)', name)
+            if not matched:
+                print('Received frame has 1 plane, but it is in non-GRAY format. Not supported.')
             bits = matched[0]
             return 'Cmono{}'.format(bits)
+        else:
+            print('Received frame has {} planes. Not supported.'.format(num_planes))
 
     def SigIntHandler(self, *args):
         self.Exit()
