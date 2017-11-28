@@ -113,7 +113,7 @@ class TCPClipServer():
             sys.exit()
 
         self.soc.listen(2)
-        print ('Socket is now listening.')
+        print ('Listening the socket.')
 
         while True:
             self.conn, addr = self.soc.accept()
@@ -124,7 +124,7 @@ class TCPClipServer():
                 Thread(target=self.ServerLoop, args=(ip, port)).start()
 
             except:
-                print ('Terible error!')
+                print ('Terrible error!')
                 traceback.print_exc()
 
         self.soc.close()
@@ -155,14 +155,14 @@ class TCPClipServer():
                     pickle.dumps('close', -1)
                 )
                 self.conn.close()
-                print ('Connection {}:{} ended.'.format(ip, port))
+                print ('Connection {}:{} closed.'.format(ip, port))
                 break
             elif qtype == TCPClipAction.Exit:
                 self.helper.send(
                     pickle.dumps('exit', -1)
                 )
                 self.conn.close()
-                print ('Connection {}:{} ended. Process will exit.'.format(ip, port))
+                print ('Connection {}:{} closed. Exiting, as client asked.'.format(ip, port))
                 os._exit(0)
                 break
             elif qtype == TCPClipAction.Header:
@@ -171,7 +171,7 @@ class TCPClipServer():
                 self.GetFrame(query['frame'])
             else:
                 self.conn.close()
-                print ('Connection {}:{} ended.'.format(ip, port))
+                print ('Received query has unknown type. Connection {}:{} closed.'.format(ip, port))
                 break
 
     def GetMeta(self):
