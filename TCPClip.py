@@ -1,9 +1,7 @@
 # TCPClip Class by DJATOM
-# Version 0.1
+# Version 0.2
 # License: MIT
-# Why? Mainly for processing on server 1 and encoding on server 2.
-# I wanted to write a replacement for TCPDeliver, but I dunno how to re-create VideoNode/VideoFrame with pure Python. 
-# TCPSource concept is better when we want to distribute filtering chain.
+# Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
 # Usage:
 #   Server side:
@@ -16,7 +14,7 @@
 #       ...
 #       py EP12.py
 # 
-#   Client side:
+#   Client side (plain encoding):
 #       from TCPClip import TCPClipClient
 #       client = TCPClipClient('<ip addr>', <port>)
 #       client.PipeToStdOut()
@@ -27,8 +25,25 @@
 #       py client.py | x264 ... --demuxer "y4m" --output "EP12.264" -
 #
 #   Notice: only frame 0 props will affect Y4M header.
+#
+#   Client side (VS Source mode):
+#       from TCPClip import TCPClipClient
+#       from vapoursynth import core
+#       clip = TCPClipClient('<ip addr>', <port>).Source(shutdown=True)
+#       <your next vpy code>
+#       clip.set_output()
+#   Batches:
+#       vspipe -y EP01.vpy - | x264 ... --demuxer "y4m" --output "EP01.264" -
+#       vspipe -y EP02.vpy - | x264 ... --demuxer "y4m" --output "EP02.264" -
+#       ...
+#       vspipe -y EP12.vpy - | x264 ... --demuxer "y4m" --output "EP12.264" -
+#
+#   Notice: frame properties will be also copied.
+#   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of TCPClipServer at the last frame.
+#
 
-from vapoursynth import core, VideoNode, VideoFrame # not really used, but I might use them in future
+from vapoursynth import core, SampleType
+import numpy as np
 import socket
 import sys
 import os
@@ -40,18 +55,16 @@ import struct
 from threading import Thread
 import traceback
 from collections import namedtuple
-from enum import IntEnum
+from enum import Enum
 
-class TCPClipVersion(IntEnum):
-    Major = 0
-    Minor = 1
+TCPClipVersionMAJOR, TCPClipVersionMINOR = 2, 1
 
-class TCPClipAction(IntEnum):
-    Version = 1
-    Close = 2
-    Exit = 3
-    Header = 4
-    Frame = 5
+class TCPClipAction(Enum):
+    VERSION = 1
+    CLOSE = 2
+    EXIT = 3
+    HEADER = 4
+    FRAME = 5
 
 class TCPClipHelper():
     def __init__(self, soc):
@@ -61,39 +74,29 @@ class TCPClipHelper():
         try:
             msg = struct.pack('>I', len(msg)) + msg
             self.soc.sendall(msg)
-
         except ConnectionResetError:
-            print ('Interrupted by Client.')
-
+            print('Interrupted by Client.', file=sys.stderr)
 
     def recv(self):
         try:
             raw_msglen = self.recvall(4)
             if not raw_msglen:
                 return None
-
             msglen = struct.unpack('>I', raw_msglen)[0]
-
             return self.recvall(msglen)
-
         except ConnectionResetError:
-            print ('Interrupted by Client.')
+            print('Interrupted by Client.', file=sys.stderr)
 
     def recvall(self, n):
         data = b''
-
         try:
             while len(data) < n:
                 packet = self.soc.recv(n - len(data))
-
                 if not packet:
                     return None
-
                 data += packet
-
         except ConnectionAbortedError:
-            print ('Connection Aborted.')
-
+            print('Connection Aborted.', file=sys.stderr)
         return data
 
 class TCPClipServer():
@@ -102,93 +105,71 @@ class TCPClipServer():
         self.threads = os.cpu_count() if threads == 0 else threads
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        print ('Socket created.')
-
+        print('Socket created.', file=sys.stderr)
         try:
             self.soc.bind((host, port))
-            print ('Socket bind complete.')
-
+            print('Socket bind complete.', file=sys.stderr)
         except socket.error as msg:
-            print ('Bind failed. Error: ' + str(sys.exc_info()))
+            print(f'Bind failed. Error: {sys.exc_info()}')
             sys.exit()
-
         self.soc.listen(2)
-        print ('Listening the socket.')
-
+        print('Listening the socket.', file=sys.stderr)
         while True:
             self.conn, addr = self.soc.accept()
             ip, port = str(addr[0]), str(addr[1])
-            print ('Accepting connection from {}:{}.'.format(ip, port))
-
+            print(f'Accepting connection from {ip}:{port}.', file=sys.stderr)
             try:
                 Thread(target=self.ServerLoop, args=(ip, port)).start()
-
             except:
-                print ('Terrible error!')
+                print("Can't start main server loop!", file=sys.stderr)
                 traceback.print_exc()
-
         self.soc.close()
 
     def ServerLoop(self, ip, port):
         self.helper = TCPClipHelper(self.conn)
-
         while True:
             input = self.helper.recv()
-
             try:
                 query = pickle.loads(input)
             except:
-                query = dict(type = TCPClipAction.Close)
-
-            qtype = query['type']
-            if qtype == TCPClipAction.Version:
-                self.helper.send(
-                    pickle.dumps(
-                        dict(
-                            major = TCPClipVersion.Major, 
-                            minor = TCPClipVersion.Minor
-                        ), 
-                        -1
-                    )
-                )
-            elif qtype == TCPClipAction.Close:
-                self.helper.send(
-                    pickle.dumps('close', -1)
-                )
+                query = dict(type=TCPClipAction.CLOSE)
+            qType = query['type']
+            if qType == TCPClipAction.VERSION:
+                self.helper.send(pickle.dumps((TCPClipVersionMAJOR, TCPClipVersionMINOR)))
+            elif qType == TCPClipAction.CLOSE:
+                self.helper.send(pickle.dumps('close'))
                 self.conn.close()
-                print ('Connection {}:{} closed.'.format(ip, port))
-                break
-            elif qtype == TCPClipAction.Exit:
-                self.helper.send(
-                    pickle.dumps('exit', -1)
-                )
+                print(f'Connection {ip}:{port} closed.', file=sys.stderr)
+                return
+            elif qType == TCPClipAction.EXIT:
+                self.helper.send(pickle.dumps('exit'))
                 self.conn.close()
-                print ('Connection {}:{} closed. Exiting, as client asked.'.format(ip, port))
+                print(f'Connection {ip}:{port} closed. Exiting, as client asked.', file=sys.stderr)
                 os._exit(0)
-                break
-            elif qtype == TCPClipAction.Header:
+                return
+            elif qType == TCPClipAction.HEADER:
                 self.GetMeta()
-            elif qtype == TCPClipAction.Frame:
-                self.GetFrame(query['frame'])
+            elif qType == TCPClipAction.FRAME:
+                self.GetFrame(query['frame'], query['pipe'])
             else:
                 self.conn.close()
-                print ('Received query has unknown type. Connection {}:{} closed.'.format(ip, port))
-                break
+                print(f'Received query has unknown type. Connection {ip}:{port} closed.', file=sys.stderr)
+                return
 
     def GetMeta(self):
         clip = self.clip
-
-        props = self.clip.get_frame(0).props
-        frameprops = []
+        props = clip.get_frame(0).props
+        frameprops = dict()
         for prop in props:
-            frameprops.append(prop)
-
+            frameprops[prop] = props[prop]
         self.helper.send(
             pickle.dumps(
                 dict(
                     format = dict(
                         id = clip.format.id, 
                         name = clip.format.name,
+                        color_family = int(clip.format.color_family), 
+                        sample_type = int(clip.format.sample_type), 
                         bits_per_sample = clip.format.bits_per_sample, 
                         bytes_per_sample = clip.format.bytes_per_sample, 
                         subsampling_w = clip.format.subsampling_w, 
@@ -201,166 +182,170 @@ class TCPClipServer():
                     fps_numerator = clip.fps.numerator, 
                     fps_denominator = clip.fps.denominator,
                     props = frameprops
-                ), 
-                -1
+                )
             )
         )
 
-    def GetFrame(self, frame):
-        for pf in range(self.threads):
-            self.clip.get_frame_async(frame+pf)
+    def GetFrame(self, frame, pipe=False):
+        if self.threads > 1:
+            for pf in range(self.threads):
+                if pf < self.clip.num_frames:
+                    self.clip.get_frame_async(frame+pf)
         singleframe = self.clip.get_frame(frame)
-
-        data=[]
+        data = []
         for i in range(self.clip.format.num_planes):
-            data.append( 
-                self.GetPlane(singleframe, i)
-            )
-
-        self.helper.send(
-            pickle.dumps(data, -1)
-        )
-
-    def GetPlane(self, singleframe, plane):
-        return bytes(singleframe.get_read_array(plane))
+            planedata = singleframe.get_read_array(i)
+            if pipe:
+                outplane = bytes(planedata)
+            else:
+                outplane = bytearray(planedata)
+            data.append(outplane)
+        frameprops = dict()
+        if not pipe:
+            props = singleframe.props
+            for prop in props:
+                frameprops[prop] = props[prop]
+        self.helper.send(pickle.dumps((data, frameprops)))
 
 class TCPClipClient():
     def __init__(self, host, port, verbose=False):
         self.verbose = verbose
-        self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.soc.connect((host, port))
+        try:
+            self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.soc.connect((host, port))
+        except ConnectionRefusedError:
+            print('Connection time-out reached. Probably closed port or server is down.', file=sys.stderr)
+            sys.exit(2)
 
     def Query(self, data):
         try:
             self.helper = TCPClipHelper(self.soc)
-            self.helper.send(pickle.dumps(data, -1))
+            self.helper.send(pickle.dumps(data))
             result = self.helper.recv()
-
             return pickle.loads(result)
         except:
-            print('Failed to make Query.')
-            sys.exit(1)
+            print('Failed to make Query.', file=sys.stderr)
+            sys.exit(2)
 
     def Version(self):
-        return self.Query(
-            dict(
-                type = TCPClipAction.Version
-            )
-        )
+        return self.Query(dict(type = TCPClipAction.VERSION))
 
     def Close(self):
-        self.Query(
-            dict(
-                type = TCPClipAction.Close
-            )
-        )
+        self.Query(dict(type = TCPClipAction.CLOSE))
         self.soc.close()
 
     def Exit(self):
-        return self.Query(
-            dict(
-                type = TCPClipAction.Exit
-            )
-        )
+        return self.Query(dict(type = TCPClipAction.EXIT))
 
     def GetMeta(self):
-        return self.Query(
-            dict(
-                type = TCPClipAction.Header
-            )
-        )
+        return self.Query(dict(type = TCPClipAction.HEADER))
 
-    def GetFrame(self, number):
-        return self.Query(
-            dict(
-                type = TCPClipAction.Frame, 
-                frame = number
-            )
-        )
+    def GetFrame(self, number, pipe = False):
+        return self.Query(dict(type = TCPClipAction.FRAME, frame = number, pipe = pipe))
 
-    def GetCSP(self, name, num_planes): # need to write better validation on non-YUV formats, I don't support it
+    def GetCSP(self, name, num_planes):
         if num_planes == 3:
-            matched = re.findall('YUV(\d+)P(\d+)', name)
-            if not matched:
-                print('Received frame has 3 planes, but they are in non-YUV format. Not supported.')
-            csp, bits = matched[0]
-            return 'C{}p{}'.format(csp, bits)
+            formatdata = re.findall('YUV(\d+)P(\d+)', name, flags=re.IGNORECASE)
+            if len(formatdata) < 1:
+                print('Received frame has 3 planes, but they are in non-YUV format. Not supported.', file=sys.stderr)
+                self.Exit()
+                sys.exit(2)
+            csp, bits = formatdata[0]
+            return f'C{csp}p{bits}'
         elif num_planes == 1:
-            matched = re.findall('GRAY(\d+)', name)
-            if not matched:
-                print('Received frame has 1 plane, but it is in non-GRAY format. Not supported.')
-            bits = matched[0]
-            return 'Cmono{}'.format(bits)
+            formatdata = re.findall('GRAY(\d+)', name, flags=re.IGNORECASE)
+            if len(formatdata) < 1:
+                print('Received frame has 1 plane, but it is in non-GRAY format. Not supported.', file=sys.stderr)
+                self.Exit()
+                sys.exit(2)
+            bits = formatdata[0]
+            return f'Cmono{bits}'
         else:
-            print('Received frame has {} planes. Not supported.'.format(num_planes))
+            print(f'Received frame has {num_planes} planes. Not supported.', file=sys.stderr)
+            self.Exit()
+            sys.exit(2)
 
     def SigIntHandler(self, *args):
         self.Exit()
-        sys.exit(0)
+        sys.exit(1)
 
     def PipeToStdOut(self):
-        ServerVersion = self.Version()
-        if ServerVersion['major'] != TCPClipVersion.Major:
-            print('Version mismatch!\nServer: {} | Client: {}'.format(ServerVersion['major'], TCPClipVersion.Major))
+        start = time.perf_counter()
+        ServerVersionMajor, _ = self.Version()
+        if ServerVersionMajor != TCPClipVersionMAJOR:
+            print(f'Version mismatch!\nServer: {ServerVersionMajor} | Client: {TCPClipVersionMAJOR}', file=sys.stderr)
+            sys.exit(2)
+        hInfo = self.GetMeta()
+        if len(hInfo) == 0:
+            print('Wrong header info.', file=sys.stderr)
             self.Exit()
-            sys.exit(1)
-
-        headerInfo = self.GetMeta()
-        if len(headerInfo) == 0:
-            print('Wrong header info.')
-            self.Exit()
-            sys.exit(1)
-
-        if 'format' in headerInfo:
-            cFormat = headerInfo['format']
+            sys.exit(2)
+        if 'format' in hInfo:
+            cFormat = hInfo['format']
         else:
-            print('Missing "Format".')
+            print('Missing "Format".', file=sys.stderr)
             self.Exit()
-            sys.exit(1)
-
-        if 'props' in headerInfo:
-            props = headerInfo['props']
+            sys.exit(2)
+        if 'props' in hInfo:
+            props = hInfo['props']
         else:
-            print('Missing "props".')
+            print('Missing "props".', file=sys.stderr)
             self.Exit()
-            sys.exit(1)
-
+            sys.exit(2)
         if '_FieldBased' in props:
-            frameType = {2: "t", 1: "b", 0: "p"}.get(props['_FieldBased'])
+            frameType = {2: 't', 1: 'b', 0: 'p'}.get(props['_FieldBased'], 'p')
         else:
             frameType = 'p'
-
         if '_SARNum' and '_SARDen' in props:
             sarNum, sarDen = props['_SARNum'], props['_SARDen']
         else:
             sarNum, sarDen = 0, 0
-
-        header = 'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frame_type} A{sar_num}:{sar_den} {csp} XYSCSS={csp} XLENGTH={frames_num}\n'.format(
-                width = headerInfo['width'], 
-                height = headerInfo['height'], 
-                fps_num = headerInfo['fps_numerator'], 
-                fps_den = headerInfo['fps_denominator'], 
-                frame_type = frameType, 
-                sar_num = sarNum, 
-                sar_den = sarDen, 
-                csp = self.GetCSP(
-                    cFormat['name'], 
-                    cFormat['num_planes']
-                ), 
-                frames_num = headerInfo['num_frames']
-            )
+        num_frames = hInfo['num_frames']
+        width = hInfo['width']
+        height = hInfo['height']
+        fps_num = hInfo['fps_numerator']
+        fps_den = hInfo['fps_denominator']
+        csp = self.GetCSP(cFormat['name'], cFormat['num_planes']),
+        header = f'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frameType} A{sarNum}:{sarDen} {csp} XYSCSS={csp} XLENGTH={num_frames}\n'
         sys.stdout.buffer.write(bytes(header, 'UTF-8'))
-
         signal.signal(signal.SIGINT, self.SigIntHandler)
-
-        for frameNumber in range(headerInfo['num_frames']):
-            frameData = self.GetFrame(frameNumber)
-
+        for frameNumber in range(num_frames):
+            if self.verbose:
+                frameTime = time.perf_counter()
+                eta = (frameTime - start) * (num_frames - (frameNumber+1)) / ((frameNumber+1))
+            frameData, _ = self.GetFrame(frameNumber, pipe=True)
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
-
             for plane in frameData:
                 sys.stdout.buffer.write(plane)
             if self.verbose:
-                 sys.stderr.write('Progress: {i}/{all}\r'.format(i=frameNumber, all=headerInfo['num_frames']))
-
+                sys.stderr.write('Processing {}/{} ({:.003f} fps) [{:.1f} %] [ETA: {:d}:{:02d}:{:02d}]  \r'.format(frameNumber, num_frames, frameNumber/frameTime, float(100 * frameNumber / num_frames), int(eta//3600), int((eta//60)%60), int(eta%60)))
         self.Exit()
+
+    def Source(self, shutdown=False):
+        def frameCopy(n, f):
+            fout = f.copy()
+            planes = fout.format.num_planes
+            frameData, frameProps = self.GetFrame(n, pipe=False)
+            dt = {1: np.uint8, 2: np.uint16, 4: np.float32}.get(fout.format.bytes_per_sample)
+            for p in range(fout.format.num_planes):
+                output_array = np.asarray(fout.get_write_array(p))
+                if p == 0:
+                    y, x = dummy.height, dummy.width
+                else:
+                    y, x = dummy.height >> dummy.format.subsampling_h, dummy.width >> dummy.format.subsampling_w
+                output_array[:] = np.asarray(np.frombuffer(frameData[p], dtype=dt)).reshape(y, x)
+            for i in frameProps:
+                fout.props[i] = frameProps[i]
+            if shutdown and n == dummy.num_frames - 1:
+                self.Exit()
+            return fout
+        ServerVersionMajor, _ = self.Version()
+        assert ServerVersionMajor == TCPClipVersionMAJOR, f'Version mismatch!\nServer: {ServerVersionMajor} | Client: {TCPClipVersionMAJOR}'
+        hInfo = self.GetMeta()
+        assert len(hInfo) > 0, 'Wrong header info.'
+        assert 'format' in hInfo, 'Missing "Format".'
+        cFmt  = hInfo['format']
+        srcFormat = core.register_format(cFmt['color_family'],cFmt['sample_type'],cFmt['bits_per_sample'],cFmt['subsampling_w'],cFmt['subsampling_h'])
+        dummy = core.std.BlankClip(width=hInfo['width'], height=hInfo['height'], format=srcFormat, length=hInfo['num_frames'], fpsnum=hInfo['fps_numerator'], fpsden=hInfo['fps_denominator'])
+        source = core.std.ModifyFrame(dummy, dummy, frameCopy)
+        return source
