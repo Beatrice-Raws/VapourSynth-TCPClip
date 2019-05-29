@@ -87,7 +87,8 @@ class Helper():
             msg = struct.pack('>I', len(msg)) + msg
             self.soc.sendall(msg)
         except ConnectionResetError:
-            message('Interrupted by client.')
+            if self.verbose:
+                message('Interrupted by client.')
 
     def recv(self) -> bytes:
         try:
@@ -97,7 +98,8 @@ class Helper():
             msglen = struct.unpack('>I', raw_msglen)[0]
             return self.recvall(msglen)
         except ConnectionResetError:
-            message('Interrupted by client.')
+            if self.verbose:
+                message('Interrupted by client.')
 
     def recvall(self, n: int) -> bytes:
         data = b''
@@ -108,7 +110,8 @@ class Helper():
                     return None
                 data += packet
         except ConnectionAbortedError:
-            message('Connection aborted.')
+            if self.verbose:
+                message('Connection aborted.')
         return data
 
 class Server():
