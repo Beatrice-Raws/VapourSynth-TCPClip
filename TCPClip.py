@@ -1,13 +1,13 @@
 # TCPClip Class by DJATOM
-# Version 2.1
+# Version 2.2
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
 # Usage:
 #   Server side:
-#       from TCPClip import TCPClipServer
+#       from TCPClip import Server
 #       <your vpy code>
-#       TCPClipServer('<ip addr>', <port>, get_output())
+#       Server('<ip addr>', <port>, get_output(), <verbose>)
 #   Batches:
 #       py EP01.py
 #       py EP02.py
@@ -15,9 +15,9 @@
 #       py EP12.py
 # 
 #   Client side (plain encoding):
-#       from TCPClip import TCPClipClient
-#       client = TCPClipClient('<ip addr>', <port>)
-#       client.pipe()
+#       from TCPClip import Client
+#       client = Client('<ip addr>', <port>, <verbose>)
+#       client.to_stdout()
 #   Batches:
 #       py client.py | x264 ... --demuxer "y4m" --output "EP01.264" -
 #       py client.py | x264 ... --demuxer "y4m" --output "EP02.264" -
@@ -27,9 +27,9 @@
 #   Notice: only frame 0 props will affect Y4M header.
 #
 #   Client side (VS Source mode):
-#       from TCPClip import TCPClipClient
+#       from TCPClip import Client
 #       from vapoursynth import core
-#       clip = TCPClipClient('<ip addr>', <port>).source(shutdown=True)
+#       clip = Client('<ip addr>', <port>, <verbose>).as_source(shutdown=True)
 #       <your next vpy code>
 #       clip.set_output()
 #   Batches:
