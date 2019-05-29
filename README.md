@@ -37,7 +37,7 @@ py client.py | x264 ... --demuxer "y4m" --output "EP12.264" -
 ```python
 from TCPClip import Client
 from vapoursynth import core
-clip = Client('<ip addr>', <port>).as_source(shutdown=True)
+clip = Client('<ip addr>', <port>, <verbose>).as_source(shutdown=True)
 <your extra vpy code>
 clip.set_output()
 ```
