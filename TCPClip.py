@@ -7,7 +7,7 @@
 #   Server side:
 #       from TCPClip import Server
 #       <your vpy code>
-#       Server('<ip addr>', <port>, get_output(), <verbose>)
+#       Server('<ip addr>', <port>, get_output(), <threads>, <verbose>)
 #   Batches:
 #       py EP01.py
 #       py EP02.py
@@ -39,7 +39,7 @@
 #       vspipe -y EP12.vpy - | x264 ... --demuxer "y4m" --output "EP12.264" -
 #
 #   Notice: frame properties will be also copied.
-#   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of TCPClipServer at the last frame.
+#   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server at the last frame.
 #
 
 from vapoursynth import core, VideoNode, VideoFrame
@@ -223,11 +223,10 @@ class Server():
 
     def get_frame(self, frame: int = 0, pipe: bool = False) -> None:
         try:
-            check_affinity = get_usable_cpus_count()
             usable_requests = min(self.threads, get_usable_cpus_count())
         except:
             usable_requests = self.threads
-        for pf in range(cast(int, min(usable_requests, self.clip.num_frames - frame))):
+        for pf in range(min(usable_requests, self.clip.num_frames - frame)):
             frame_to_pf = int(frame + pf)
             if frame_to_pf not in self.frame_queue_buffer:
                 self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(frame_to_pf)
