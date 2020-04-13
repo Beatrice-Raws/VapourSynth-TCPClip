@@ -376,8 +376,7 @@ class Client():
             fout = f.copy()
             frame_data, frame_props = self.get_frame(n, pipe=False)
             for p in range(fout.format.num_planes):
-                output_array = np.asarray(fout.get_write_array(p))
-                output_array[:] = frame_data[p]
+                np.asarray(fout.get_write_array(p))[:] = frame_data[p]
             for i in frame_props:
                 fout.props[i] = frame_props[i]
             if shutdown and n == dummy.num_frames - 1:
