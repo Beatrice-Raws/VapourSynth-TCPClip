@@ -243,12 +243,7 @@ class Server():
         out_frame = self.frame_queue_buffer.pop(frame).result()
         frame_data = list()
         for plane in range(self.clip.format.num_planes):
-            plane_data = out_frame.get_read_array(plane)
-            if pipe:
-                out_plane = bytes(plane_data)
-            else:
-                out_plane = bytearray(plane_data)
-            frame_data.append(out_plane)
+            frame_data.append(np.asarray(out_frame.get_read_array(plane)))
         if not pipe:
             frame_props = dict(out_frame.props)
             self.helper.send(pickle.dumps((frame_data, frame_props)))
@@ -371,7 +366,7 @@ class Client():
             frame_data = self.get_frame(frame_number, pipe=True)
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
             for plane in frame_data:
-                sys.stdout.buffer.write(plane)
+                sys.stdout.buffer.write(bytes(plane))
             if self.verbose:
                 sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
         self.exit()
@@ -380,14 +375,9 @@ class Client():
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
             fout = f.copy()
             frame_data, frame_props = self.get_frame(n, pipe=False)
-            dt = {1: np.uint8, 2: np.uint16, 4: np.float32}.get(fout.format.bytes_per_sample)
             for p in range(fout.format.num_planes):
                 output_array = np.asarray(fout.get_write_array(p))
-                if p == 0:
-                    y, x = dummy.height, dummy.width
-                else:
-                    y, x = dummy.height >> dummy.format.subsampling_h, dummy.width >> dummy.format.subsampling_w
-                output_array[:] = np.asarray(np.frombuffer(frame_data[p], dtype=dt)).reshape(y, x)
+                output_array[:] = frame_data[p]
             for i in frame_props:
                 fout.props[i] = frame_props[i]
             if shutdown and n == dummy.num_frames - 1:
