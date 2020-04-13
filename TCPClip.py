@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.2.1
+# Version 2.2.2
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -70,7 +70,7 @@ def message(text: str = '') -> None:
 class Version(object):
     MAJOR   = 2
     MINOR   = 2
-    BUGFIX  = 1
+    BUGFIX  = 2
 
 class Action(Enum):
     VERSION = 1
@@ -170,6 +170,11 @@ class Server():
                     message(f'TCPClip version sent.')
             elif query_type == Action.CLOSE:
                 self.helper.send(pickle.dumps('close'))
+                for frame in list(self.frame_queue_buffer):
+                    del self.frame_queue_buffer[frame]
+                    if self.verbose:
+                        message(f'Frame {frame} freed.')
+                self.frame_queue_buffer.clear()
                 self.conn.close()
                 if self.verbose:
                     message(f'Connection {ip}:{port} closed.')
@@ -249,6 +254,7 @@ class Server():
             self.helper.send(pickle.dumps((frame_data, frame_props)))
         else:
             self.helper.send(pickle.dumps(frame_data))
+        del out_frame
 
 class Client():
     def __init__(self, host: str, port: int, verbose: bool = False) -> None:
