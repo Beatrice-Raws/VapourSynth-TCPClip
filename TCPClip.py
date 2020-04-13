@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.2
+# Version 2.2.1
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -70,6 +70,7 @@ def message(text: str = '') -> None:
 class Version(object):
     MAJOR   = 2
     MINOR   = 2
+    BUGFIX  = 1
 
 class Action(Enum):
     VERSION = 1
@@ -163,7 +164,7 @@ class Server():
             if query_type == Action.VERSION:
                 if self.verbose:
                     message(f'Requested TCPClip version.')
-                self.helper.send(pickle.dumps((Version.MAJOR, Version.MINOR)))
+                self.helper.send(pickle.dumps((Version.MAJOR, Version.MINOR, Version.BUGFIX)))
                 if self.verbose:
                     message(f'TCPClip version sent.')
             elif query_type == Action.CLOSE:
