@@ -42,7 +42,7 @@
 #   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server at the last frame.
 #
 
-from vapoursynth import core, VideoNode, VideoFrame
+from vapoursynth import core, VideoNode, VideoFrame # pylint: disable=no-name-in-module
 import numpy as np
 import socket
 import sys
@@ -133,7 +133,7 @@ class Server():
             self.soc.bind((host, port))
             if self.verbose:
                 message('Socket bind complete.')
-        except socket.error as msg:
+        except socket.error:
             if self.verbose:
                 message(f'Bind failed. Error: {sys.exc_info()}')
             sys.exit(2)
@@ -372,7 +372,6 @@ class Client():
     def as_source(self, shutdown: bool = False) -> VideoNode:
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
             fout = f.copy()
-            planes = fout.format.num_planes
             frame_data, frame_props = self.get_frame(n, pipe=False)
             dt = {1: np.uint8, 2: np.uint16, 4: np.float32}.get(fout.format.bytes_per_sample)
             for p in range(fout.format.num_planes):
