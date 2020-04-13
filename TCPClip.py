@@ -80,8 +80,9 @@ class Action(Enum):
     FRAME   = 5
 
 class Helper():
-    def __init__(self, soc: socket) -> None:
+    def __init__(self, soc: socket, verbose: bool = False) -> None:
         self.soc = soc
+        self.verbose = verbose
 
     def send(self, msg: any) -> None:
         try:
@@ -153,7 +154,7 @@ class Server():
         self.soc.close()
 
     def server_loop(self, ip: str, port: int) -> None:
-        self.helper = Helper(self.conn)
+        self.helper = Helper(self.conn, self.verbose)
         while True:
             input = self.helper.recv()
             try:
@@ -256,7 +257,7 @@ class Client():
         try:
             self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.soc.connect((host, port))
-            self.helper = Helper(self.soc)
+            self.helper = Helper(self.soc, self.verbose)
         except ConnectionRefusedError:
             if self.verbose:
                 message('Connection time-out reached. Probably closed port or server is down.')
