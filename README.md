@@ -3,11 +3,11 @@ Python class for distributed video processing and encoding
 
 ## Usage
 
-### Server side
+### Server side (adjust threads or don't set varibale for auto-detection)
 ```python
 from TCPClip import Server
 <your vpy code>
-Server('<ip addr>', <port>, get_output(), <threads>, <verbose>)
+Server('<ip addr>', 14322, get_output(), threads=8, log_level='info')
 ```
 
 #### Batches
@@ -21,8 +21,7 @@ py EP12.py
 ### Client side (plain encoding)
 ```python
 from TCPClip import Client
-client = Client('<ip addr>', <port>, <verbose>)
-client.to_stdout()
+Client('<ip addr>', port=14322, log_level='info', shutdown=True).to_stdout()
 ```
 
 #### Batches (plain encoding)
@@ -37,7 +36,7 @@ py client.py | x264 ... --demuxer "y4m" --output "EP12.264" -
 ```python
 from TCPClip import Client
 from vapoursynth import core
-clip = Client('<ip addr>', <port>, <verbose>).as_source(shutdown=True)
+clip = Client('<ip addr>', port=14322, log_level='info', shutdown=True).as_source()
 <your extra vpy code>
 clip.set_output()
 ```
