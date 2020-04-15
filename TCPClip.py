@@ -83,6 +83,7 @@ class LL(IntEnum):
     Debug   = 4
 
 class Util(object):
+    """ Various utilities for Server and Client. """
     def __new__(cls):
         """ Instantiate Utils as Singleton object """
         if not hasattr(cls, 'instance'):
@@ -90,6 +91,7 @@ class Util(object):
         return cls.instance
 
     def get_caller(self) -> Union[str, tuple]:
+        """ Some piece of code to retieve caller class stuff. """
         def stack_(frame):
             framelist = []
             while frame:
@@ -106,11 +108,13 @@ class Util(object):
         return 'Main'
 
     def as_enum(self, level: str = 'info') -> LL:
+        """ Cast log level to LL Enum. """
         if isinstance(level, str):
             level = {'crit': LL.Crit, 'warn': LL.Warn, 'info': LL.Info, 'debug': LL.Debug}.get(level)
         return level
 
     def message(self, level: str, text: str) -> None:
+        """ Output log message according log level. """
         facility, parrent_level = self.get_caller()
         if self.as_enum(parrent_level) >= Util().as_enum(level):
             print(f'{facility:6s} [{level}]: {text}', file=sys.stderr)
@@ -122,11 +126,14 @@ class Util(object):
         return {4: socket.AF_INET, 6: socket.AF_INET6}.get(version, socket.AF_INET)
 
 class Helper():
+    """ Convenient helper for working with socket stuff. """
     def __init__(self, soc: socket, log_level: Union[str, LL] = None) -> None:
+        """ Constructor for Helper """
         self.soc = soc
         self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
 
     def send(self, msg: any) -> None:
+        """ Send data to another endpoint. """
         try:
             msg = struct.pack('>I', len(msg)) + msg
             self.soc.sendall(msg)
@@ -134,6 +141,7 @@ class Helper():
             Util().message('crit', 'send - interrupted by client.')
 
     def recv(self) -> bytes:
+        """ Receive data. """
         try:
             raw_msglen = self.recvall(4)
             if not raw_msglen:
@@ -144,6 +152,7 @@ class Helper():
             Util().message('crit', 'recv - interrupted by client.')
 
     def recvall(self, n: int) -> bytes:
+        """ Helper method for recv. """
         data = b''
         try:
             while len(data) < n:
@@ -156,7 +165,9 @@ class Helper():
         return data
 
 class Server():
+    """ Server class for serving Vapoursynth's clips. """
     def __init__(self, host: str = None, port: int = 14322, clip: VideoNode = None, threads: int = 0, log_level: Union[str, LL] = 'info') -> None:
+        """ Constructor for Server. """
         self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
         if not isinstance(clip, VideoNode):
             Util().message('crit', 'argument "clip" has wrong type.')
@@ -195,6 +206,7 @@ class Server():
         self.soc.close()
 
     def server_loop(self, ip: str, port: int) -> None:
+        """ Process client's requests. """
         self.helper = Helper(self.conn, self.log_level)
         while True:
             input = self.helper.recv()
@@ -239,6 +251,7 @@ class Server():
                 return
 
     def get_meta(self) -> None:
+        """ Query clip metadata and send to client. """
         clip = self.clip
         props = dict(clip.get_frame(0).props)
         self.helper.send(
@@ -266,6 +279,7 @@ class Server():
         )
 
     def get_frame(self, frame: int = 0, pipe: bool = False) -> None:
+        """ Query arbitrary frame and send it to Client. """
         try:
             usable_requests = min(self.threads, get_usable_cpus_count())
         except:
@@ -285,7 +299,9 @@ class Server():
         del out_frame
 
 class Client():
+    """ Client class for retrieving Vapoursynth clips. """
     def __init__(self, host: str, port: int = 14322, log_level: str = 'info', shutdown: bool = False) -> None:
+        """ Constructor for Client. """
         self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
         self.shutdown = shutdown
         self._stop = False # workaround for early interrupt
@@ -298,10 +314,12 @@ class Client():
             sys.exit(2)
 
     def __del__(self) -> None:
+        """ Destructor for Client. """
         if self.shutdown: # kill server on exit
             self.exit()
 
     def query(self, data: dict) -> Any:
+        """ Handle arbitrary queries via single method. """
         try:
             self.helper.send(pickle.dumps(data))
             answer = pickle.loads(self.helper.recv())
@@ -314,6 +332,7 @@ class Client():
             sys.exit(2)
 
     def version(self, minor: bool = False) -> Union[tuple, int]:
+        """ Wrapper for requesting Server's version. """
         v = self.query(dict(type=Action.VERSION))
         if minor:
             return v
@@ -321,10 +340,12 @@ class Client():
             return v[0]
 
     def close(self) -> None:
+        """ Wrapper for terminating Client's connection. """
         self.query(dict(type=Action.CLOSE))
         self.soc.close()
 
     def exit(self, code: int = 0) -> None:
+        """ Wrapper for terminating Client and Server at once. """
         try:
             self.query(dict(type=Action.EXIT))
             self.soc.close()
@@ -333,12 +354,15 @@ class Client():
             pass
 
     def get_meta(self) -> dict:
+        """ Wrapper for requesting clip's info. """
         return self.query(dict(type=Action.HEADER))
 
     def get_frame(self, frame: int, pipe: bool = False) -> Union[Tuple[list, dict], list]:
+        """ Wrapper for requesting arbitrary frame from the Server. """
         return self.query(dict(type=Action.FRAME, frame=frame, pipe=pipe))
 
     def get_y4m_csp(self, clip_format: dict) -> str:
+        """ Colorspace string builder. """
         if clip_format['bits_per_sample'] > 16:
             Util().message('crit', 'only 8-16 bit YUV or Gray formats are supported for Y4M outputs.')
             self.exit(2)
@@ -355,9 +379,11 @@ class Client():
         return {1: f'Cmono{bits}', 3: f'C{csp}p{bits}'}.get(clip_format['num_planes'], 'C420p8')
 
     def sigint_handler(self, *args) -> None:
+        """ Handle "to_stdout()"'s cancelation. """
         self._stop = True
 
     def to_stdout(self) -> None:
+        """ Pipe frames via stdout. """
         if self.log_level >= LL.Info:
             start = time.perf_counter()
         server_version = self.version()
@@ -408,6 +434,7 @@ class Client():
                 sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
 
     def as_source(self) -> VideoNode:
+        """ Expose Client as source filter for Vapoursynth. """
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
             fout = f.copy()
             frame_data, frame_props = self.get_frame(n, pipe=False)
