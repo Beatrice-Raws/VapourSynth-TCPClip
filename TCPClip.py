@@ -114,6 +114,12 @@ class Util(object):
         if self.as_enum(parrent_level) >= Util().as_enum(level):
             print(f'{facility:6s} [{level}]: {text}', file=sys.stderr)
 
+    def get_proto_version(self, addr: str):
+        if addr[0] == '[' and addr[-1] == ']':
+            addr = addr[1:-1]
+        version = ipaddress.ip_address(addr).version
+        return {4: socket.AF_INET, 6: socket.AF_INET6}.get(version, socket.AF_INET)
+
 class Helper():
     def __init__(self, soc: socket, log_level: Union[str, LL] = None) -> None:
         self.soc = soc
@@ -157,7 +163,7 @@ class Server():
         self.clip = clip
         self.threads = core.num_threads if threads == 0 else threads
         self.frame_queue_buffer = dict()
-        self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.soc = socket.socket(Util().get_proto_version(host), socket.SOCK_STREAM)
         self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         Util().message('info', 'socket created.')
         try:
@@ -271,7 +277,7 @@ class Client():
         self.shutdown = shutdown
         self._stop = False # workaround for early interrupt
         try:
-            self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.soc = socket.socket(Util().get_proto_version(host), socket.SOCK_STREAM)
             self.soc.connect((host, port))
             self.helper = Helper(self.soc, self.log_level)
         except ConnectionRefusedError:
