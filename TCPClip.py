@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.2.4
+# Version 2.3.0
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -53,7 +53,7 @@ import pickle
 import signal
 import struct
 from threading import Thread
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import cast, Any, Union, List, Tuple
 
 try:
@@ -75,18 +75,56 @@ class Action(Enum):
     HEADER  = 4
     FRAME   = 5
 
+class LL(IntEnum):
+    Crit    = 1
+    Warn    = 2
+    Info    = 3
+    Debug   = 4
+
+class Util(object):
+    def __new__(cls):
+        """ Instantiate Utils as Singleton object """
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(Util, cls).__new__(cls)
+        return cls.instance
+
+    def get_caller(self) -> Union[str, tuple]:
+        def stack_(frame):
+            framelist = []
+            while frame:
+                framelist.append(frame)
+                frame = frame.f_back
+            return framelist
+        stack = stack_(sys._getframe(1))
+        if len(stack) < 2:
+            return 'Main'
+        parentframe = stack[1]
+        if 'self' in parentframe.f_locals:
+            parrent_cls = parentframe.f_locals['self']
+            return (parrent_cls.__class__.__name__, parrent_cls.log_level)
+        return 'Main'
+
+    def as_enum(self, level: str = 'info') -> LL:
+        if isinstance(level, str):
+            level = {'crit': LL.Crit, 'warn': LL.Warn, 'info': LL.Info, 'debug': LL.Debug}.get(level)
+        return level
+
+    def message(self, level: str, text: str) -> None:
+        facility, parrent_level = self.get_caller()
+        if self.as_enum(parrent_level) >= Util().as_enum(level):
+            print(f'{facility:6s} [{level}]: {text}', file=sys.stderr)
+
 class Helper():
-    def __init__(self, soc: socket, verbose: bool = False) -> None:
+    def __init__(self, soc: socket, log_level: Union[str, LL] = None) -> None:
         self.soc = soc
-        self.verbose = verbose
+        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
 
     def send(self, msg: any) -> None:
         try:
             msg = struct.pack('>I', len(msg)) + msg
             self.soc.sendall(msg)
         except ConnectionResetError:
-            if self.verbose:
-                message('Interrupted by client.')
+            Util().message('crit', 'send - interrupted by client.')
 
     def recv(self) -> bytes:
         try:
@@ -96,8 +134,7 @@ class Helper():
             msglen = struct.unpack('>I', raw_msglen)[0]
             return self.recvall(msglen)
         except ConnectionResetError:
-            if self.verbose:
-                message('Interrupted by client.')
+            Util().message('crit', 'recv - interrupted by client.')
 
     def recvall(self, n: int) -> bytes:
         data = b''
@@ -108,48 +145,41 @@ class Helper():
                     return None
                 data += packet
         except ConnectionAbortedError:
-            if self.verbose:
-                message('Connection aborted.')
+            Util().message('crit', 'recvall - connection aborted.')
         return data
 
 class Server():
-    def __init__(self, host: str = None, port: int = 14322, clip: VideoNode = None, threads: int = 0, verbose: bool = True) -> None:
-        self.verbose = verbose 
+    def __init__(self, host: str = None, port: int = 14322, clip: VideoNode = None, threads: int = 0, log_level: Union[str, LL] = 'info') -> None:
+        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
         if not isinstance(clip, VideoNode):
-            if self.verbose:
-                message('Argument "clip" has wrong type.')
-            sys.exit()
+            Util().message('crit', 'argument "clip" has wrong type.')
+            sys.exit(2)
         self.clip = clip
         self.threads = core.num_threads if threads == 0 else threads
         self.frame_queue_buffer = dict()
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if self.verbose:
-            message('Socket created.')
+        Util().message('info', 'socket created.')
         try:
             self.soc.bind((host, port))
-            if self.verbose:
-                message('Socket bind complete.')
+            Util().message('info', 'socket bind complete.')
         except socket.error:
-            if self.verbose:
-                message(f'Bind failed. Error: {sys.exc_info()}')
+            Util().message('crit', f'bind failed. Error: {sys.exc_info()}')
             sys.exit(2)
         self.soc.listen(2)
-        if self.verbose:
-            message('Listening the socket.')
+        Util().message('info', 'listening the socket.')
         while True:
-            self.conn, addr = self.soc.accept()
-            ip, port = str(addr[0]), str(addr[1])
-            if self.verbose:
-                message(f'Accepting connection from {ip}:{port}.')
-            try:
-                Thread(target=self.server_loop, args=(ip, port)).start()
-            except:
-                message(f"Can't start main server loop! {sys.exc_info()}")
+                self.conn, addr = self.soc.accept()
+                ip, port = str(addr[0]), str(addr[1])
+                Util().message('info', f'accepting connection from {ip}:{port}.')
+                try:
+                    Thread(target=self.server_loop, args=(ip, port)).start()
+                except:
+                    Util().message('crit', f'can\'t start main server loop! {sys.exc_info()}')
         self.soc.close()
 
     def server_loop(self, ip: str, port: int) -> None:
-        self.helper = Helper(self.conn, self.verbose)
+        self.helper = Helper(self.conn, self.log_level)
         while True:
             input = self.helper.recv()
             try:
@@ -158,45 +188,35 @@ class Server():
                 query = dict(type=Action.CLOSE)
             query_type = query['type']
             if query_type == Action.VERSION:
-                if self.verbose:
-                    message(f'Requested TCPClip version.')
+                Util().message('debug', f'requested TCPClip version.')
                 self.helper.send(pickle.dumps((Version.MAJOR, Version.MINOR, Version.BUGFIX)))
-                if self.verbose:
-                    message(f'TCPClip version sent.')
+                Util().message('debug', f'TCPClip version sent.')
             elif query_type == Action.CLOSE:
                 self.helper.send(pickle.dumps('close'))
                 for frame in list(self.frame_queue_buffer):
                     del self.frame_queue_buffer[frame]
-                    if self.verbose:
-                        message(f'Frame {frame} freed.')
+                    Util().message('debug', f'frame {frame} freed.')
                 self.frame_queue_buffer.clear()
                 self.conn.close()
-                if self.verbose:
-                    message(f'Connection {ip}:{port} closed.')
+                Util().message('info', f'connection {ip}:{port} closed.')
                 return
             elif query_type == Action.EXIT:
                 self.helper.send(pickle.dumps('exit'))
                 self.conn.close()
-                if self.verbose:
-                    message(f'Connection {ip}:{port} closed. Exiting, as client asked.')
+                Util().message('info', f'connection {ip}:{port} closed. Exiting, as client asked.')
                 os._exit(0)
                 return
             elif query_type == Action.HEADER:
-                if self.verbose:
-                    message(f'Requested clip info header.')
+                Util().message('debug', f'requested clip info header.')
                 self.get_meta()
-                if self.verbose:
-                    message(f'Clip info header sent.')
+                Util().message('debug', f'clip info header sent.')
             elif query_type == Action.FRAME:
-                if self.verbose:
-                    message(f'Requested frame # {query["frame"]}.')
+                Util().message('debug', f'requested frame # {query["frame"]}.')
                 self.get_frame(query['frame'], query['pipe'])
-                if self.verbose:
-                    message(f'Frame # {query["frame"]} sent.')
+                Util().message('debug', f'frame # {query["frame"]} sent.')
             else:
                 self.conn.close()
-                if self.verbose:
-                    message(f'Received query has unknown type. Connection {ip}:{port} closed.')
+                Util().message('warn', f'received query has unknown type. Connection {ip}:{port} closed.')
                 return
 
     def get_meta(self) -> None:
@@ -235,6 +255,7 @@ class Server():
             frame_to_pf = int(frame + pf)
             if frame_to_pf not in self.frame_queue_buffer:
                 self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(frame_to_pf)
+                Util().message('debug', f'get_frame_async({frame_to_pf}) called at get_frame({frame}).')
         out_frame = self.frame_queue_buffer.pop(frame).result()
         frame_data = [np.asarray(plane) for plane in out_frame.planes()]
         if not pipe:
@@ -245,17 +266,16 @@ class Server():
         del out_frame
 
 class Client():
-    def __init__(self, host: str, port: int, verbose: bool = False, shutdown: bool = False) -> None:
-        self.verbose = verbose
+    def __init__(self, host: str, port: int = 14322, log_level: str = 'info', shutdown: bool = False) -> None:
+        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
         self.shutdown = shutdown
         self._stop = False # workaround for early interrupt
         try:
             self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.soc.connect((host, port))
-            self.helper = Helper(self.soc, self.verbose)
+            self.helper = Helper(self.soc, self.log_level)
         except ConnectionRefusedError:
-            if self.verbose:
-                message('Connection time-out reached. Probably closed port or server is down.')
+            Util().message('crit', 'connection time-out reached. Probably closed port or server is down.')
             sys.exit(2)
 
     def __del__(self) -> None:
@@ -267,8 +287,7 @@ class Client():
             self.helper.send(pickle.dumps(data))
             return pickle.loads(self.helper.recv())
         except:
-            if self.verbose:
-                message(f'Failed to make query {data}.')
+            Util().message('crit', f'failed to make query {data}.')
             sys.exit(2)
 
     def version(self, minor: bool = False) -> Union[tuple, int]:
@@ -295,8 +314,7 @@ class Client():
 
     def get_y4m_csp(self, clip_format: dict) -> str:
         if clip_format['bits_per_sample'] > 16:
-            if self.verbose:
-                message('Only 8-16 bit YUV or Gray formats are supported for Y4M outputs.')
+            Util().message('crit', 'only 8-16 bit YUV or Gray formats are supported for Y4M outputs.')
             self.exit(2)
         bits = clip_format['bits_per_sample']
         if clip_format['num_planes'] == 3:
@@ -314,29 +332,25 @@ class Client():
         self._stop = True
 
     def to_stdout(self) -> None:
-        if self.verbose:
+        if self.log_level >= LL.Info:
             start = time.perf_counter()
         server_version = self.version()
         if server_version != Version.MAJOR:
-            if self.verbose:
-                message(f'Version mismatch!\nServer: {server_version} | Client: {Version.MAJOR}')
+            Util().message('crit', f'version mismatch!\nServer: {server_version} | Client: {Version.MAJOR}')
             self.exit(2)
         header_info = self.get_meta()
         if len(header_info) == 0:
-            if self.verbose:
-                message('Wrong header info.')
+            Util().message('crit', 'wrong header info.')
             self.exit(2)
         if 'format' in header_info:
             clip_format = header_info['format']
         else:
-            if self.verbose:
-                message('Missing "Format".')
+            Util().message('crit', 'missing "Format".')
             self.exit(2)
         if 'props' in header_info:
             props = header_info['props']
         else:
-            if self.verbose:
-                message('Missing "props".')
+            Util().message('crit', 'missing "props".')
             self.exit(2)
         if '_FieldBased' in props:
             frameType = {2: 't', 1: 'b', 0: 'p'}.get(props['_FieldBased'], 'p')
@@ -357,14 +371,14 @@ class Client():
         for frame_number in range(num_frames):
             if self._stop:
                 break
-            if self.verbose:
+            if self.log_level >= LL.Info:
                 frameTime = time.perf_counter()
                 eta = (frameTime - start) * (num_frames - (frame_number+1)) / ((frame_number+1))
             frame_data = self.get_frame(frame_number, pipe=True)
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
             for plane in frame_data:
                 sys.stdout.buffer.write(plane)
-            if self.verbose:
+            if self.log_level >= LL.Info:
                 sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
 
     def as_source(self) -> VideoNode:
