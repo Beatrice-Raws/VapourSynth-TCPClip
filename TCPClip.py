@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.2.3
+# Version 2.2.4
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -62,9 +62,6 @@ try:
         return len(Process().cpu_affinity())
 except:
     pass
-
-def message(text: str = '') -> None:
-    print(text, file=sys.stderr)
 
 class Version(object):
     MAJOR   = 2
@@ -248,8 +245,9 @@ class Server():
         del out_frame
 
 class Client():
-    def __init__(self, host: str, port: int, verbose: bool = False) -> None:
+    def __init__(self, host: str, port: int, verbose: bool = False, shutdown: bool = False) -> None:
         self.verbose = verbose
+        self.shutdown = shutdown
         self._stop = False # workaround for early interrupt
         try:
             self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -259,6 +257,10 @@ class Client():
             if self.verbose:
                 message('Connection time-out reached. Probably closed port or server is down.')
             sys.exit(2)
+
+    def __del__(self) -> None:
+        if self.shutdown: # kill server on exit
+            self.exit()
 
     def query(self, data: dict) -> Any:
         try:
@@ -365,7 +367,7 @@ class Client():
             if self.verbose:
                 sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
 
-    def as_source(self, shutdown: bool = False) -> VideoNode:
+    def as_source(self) -> VideoNode:
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
             fout = f.copy()
             frame_data, frame_props = self.get_frame(n, pipe=False)
@@ -373,8 +375,6 @@ class Client():
                 np.asarray(fout.get_write_array(p))[:] = frame_data[p]
             for i in frame_props:
                 fout.props[i] = frame_props[i]
-            if shutdown and n == dummy.num_frames - 1:
-                self.exit()
             return fout
         server_version = self.version()
         assert server_version == Version.MAJOR, f'Version mismatch!\nServer: {server_version} | Client: {Version.MAJOR}'
