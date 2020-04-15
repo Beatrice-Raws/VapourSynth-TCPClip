@@ -66,8 +66,8 @@ except:
 
 class Version(object):
     MAJOR   = 2
-    MINOR   = 2
-    BUGFIX  = 2
+    MINOR   = 3
+    BUGFIX  = 0
 
 class Action(Enum):
     VERSION = 1
