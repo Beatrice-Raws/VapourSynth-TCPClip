@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.2.2
+# Version 2.2.3
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -52,7 +52,6 @@ import re
 import pickle
 import signal
 import struct
-import traceback
 from threading import Thread
 from enum import Enum
 from typing import cast, Any, Union, List, Tuple
@@ -149,8 +148,7 @@ class Server():
             try:
                 Thread(target=self.server_loop, args=(ip, port)).start()
             except:
-                message("Can't start main server loop!")
-                traceback.print_exc()
+                message(f"Can't start main server loop! {sys.exc_info()}")
         self.soc.close()
 
     def server_loop(self, ip: str, port: int) -> None:
@@ -241,9 +239,7 @@ class Server():
             if frame_to_pf not in self.frame_queue_buffer:
                 self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(frame_to_pf)
         out_frame = self.frame_queue_buffer.pop(frame).result()
-        frame_data = list()
-        for plane in range(self.clip.format.num_planes):
-            frame_data.append(np.asarray(out_frame.get_read_array(plane)))
+        frame_data = [np.asarray(plane) for plane in out_frame.planes()]
         if not pipe:
             frame_props = dict(out_frame.props)
             self.helper.send(pickle.dumps((frame_data, frame_props)))
@@ -354,8 +350,7 @@ class Client():
         fps_num = header_info['fps_numerator']
         fps_den = header_info['fps_denominator']
         csp = self.get_y4m_csp(clip_format)
-        header = f'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frameType} A{sar_num}:{sar_den} {csp} XYSCSS={csp} XLENGTH={num_frames}\n'
-        sys.stdout.buffer.write(bytes(header, 'UTF-8'))
+        sys.stdout.buffer.write(bytes(f'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frameType} A{sar_num}:{sar_den} {csp} XYSCSS={csp} XLENGTH={num_frames}\n', 'UTF-8'))
         signal.signal(signal.SIGINT, self.sigint_handler)
         for frame_number in range(num_frames):
             if self._stop:
@@ -366,10 +361,9 @@ class Client():
             frame_data = self.get_frame(frame_number, pipe=True)
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
             for plane in frame_data:
-                sys.stdout.buffer.write(bytes(plane))
+                sys.stdout.buffer.write(plane)
             if self.verbose:
                 sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
-        self.exit()
 
     def as_source(self, shutdown: bool = False) -> VideoNode:
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
