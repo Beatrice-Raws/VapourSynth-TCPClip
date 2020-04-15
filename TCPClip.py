@@ -164,6 +164,7 @@ class Server():
         self.clip = clip
         self.threads = core.num_threads if threads == 0 else threads
         self.frame_queue_buffer = dict()
+        self.client_connected = False
         self.soc = socket.socket(Util().get_proto_version(host), socket.SOCK_STREAM)
         self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         Util().message('info', 'socket created.')
@@ -176,11 +177,19 @@ class Server():
         self.soc.listen(2)
         Util().message('info', 'listening the socket.')
         while True:
-                self.conn, addr = self.soc.accept()
+                conn, addr = self.soc.accept()
                 ip, port = str(addr[0]), str(addr[1])
                 Util().message('info', f'accepting connection from {ip}:{port}.')
                 try:
-                    Thread(target=self.server_loop, args=(ip, port)).start()
+                    if not self.client_connected:
+                        self.conn = conn
+                        self.client_connected = True
+                        Thread(target=self.server_loop, args=(ip, port)).start()
+                    else:
+                        Helper(conn, self.log_level).send(pickle.dumps('busy'))
+                        Util().message('info', 'client already connected, server busy!')
+                        conn.close()
+                        Util().message('info', f'connection {ip}:{port} closed.')
                 except:
                     Util().message('crit', f'can\'t start main server loop! {sys.exc_info()}')
         self.soc.close()
@@ -205,11 +214,13 @@ class Server():
                     Util().message('debug', f'frame {frame} freed.')
                 self.frame_queue_buffer.clear()
                 self.conn.close()
+                self.client_connected = False
                 Util().message('info', f'connection {ip}:{port} closed.')
                 return
             elif query_type == Action.EXIT:
                 self.helper.send(pickle.dumps('exit'))
                 self.conn.close()
+                self.client_connected = False
                 Util().message('info', f'connection {ip}:{port} closed. Exiting, as client asked.')
                 os._exit(0)
                 return
@@ -223,6 +234,7 @@ class Server():
                 Util().message('debug', f'frame # {query["frame"]} sent.')
             else:
                 self.conn.close()
+                self.client_connected = False
                 Util().message('warn', f'received query has unknown type. Connection {ip}:{port} closed.')
                 return
 
@@ -292,7 +304,11 @@ class Client():
     def query(self, data: dict) -> Any:
         try:
             self.helper.send(pickle.dumps(data))
-            return pickle.loads(self.helper.recv())
+            answer = pickle.loads(self.helper.recv())
+            if answer == "busy":
+                Util().message('crit', f'server is busy.')
+                sys.exit(2)
+            return answer
         except:
             Util().message('crit', f'failed to make query {data}.')
             sys.exit(2)
@@ -309,9 +325,12 @@ class Client():
         self.soc.close()
 
     def exit(self, code: int = 0) -> None:
-        self.query(dict(type=Action.EXIT))
-        self.soc.close()
-        sys.exit(code)
+        try:
+            self.query(dict(type=Action.EXIT))
+            self.soc.close()
+            sys.exit(code)
+        except:
+            pass
 
     def get_meta(self) -> dict:
         return self.query(dict(type=Action.HEADER))
