@@ -13,7 +13,7 @@
 #       py EP02.py
 #       ...
 #       py EP12.py
-# 
+#
 #   Client side (plain encoding):
 #       from TCPClip import Client
 #       client = Client('<ip addr>', <port>, <verbose>)
@@ -42,10 +42,10 @@
 #   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server at the last frame.
 #
 
-from vapoursynth import core, VideoNode, VideoFrame # pylint: disable=no-name-in-module
+from vapoursynth import core, VideoNode, VideoFrame  # pylint: disable=no-name-in-module
 import numpy as np
 import socket
-from socket import AddressFamily # pylint: disable=no-name-in-module
+from socket import AddressFamily  # pylint: disable=no-name-in-module
 import sys
 import os
 import time
@@ -60,28 +60,33 @@ from typing import cast, Any, Union, List, Tuple
 
 try:
     from psutil import Process
+
     def get_usable_cpus_count() -> int:
         return len(Process().cpu_affinity())
-except:
+except BaseException:
     pass
 
+
 class Version(object):
-    MAJOR   = 2
-    MINOR   = 3
-    BUGFIX  = 0
+    MAJOR = 2
+    MINOR = 3
+    BUGFIX = 0
+
 
 class Action(Enum):
     VERSION = 1
-    CLOSE   = 2
-    EXIT    = 3
-    HEADER  = 4
-    FRAME   = 5
+    CLOSE = 2
+    EXIT = 3
+    HEADER = 4
+    FRAME = 5
+
 
 class LL(IntEnum):
-    Crit    = 1
-    Warn    = 2
-    Info    = 3
-    Debug   = 4
+    Crit = 1
+    Warn = 2
+    Info = 3
+    Debug = 4
+
 
 class Util(object):
     """ Various utilities for Server and Client. """
@@ -111,7 +116,11 @@ class Util(object):
     def as_enum(self, level: str = 'info') -> LL:
         """ Cast log level to LL Enum. """
         if isinstance(level, str):
-            level = {'crit': LL.Crit, 'warn': LL.Warn, 'info': LL.Info, 'debug': LL.Debug}.get(level)
+            level = {
+                'crit': LL.Crit,
+                'warn': LL.Warn,
+                'info': LL.Info,
+                'debug': LL.Debug}.get(level)
         return level
 
     def message(self, level: str, text: str) -> None:
@@ -124,14 +133,21 @@ class Util(object):
         if addr[0] == '[' and addr[-1] == ']':
             addr = addr[1:-1]
         version = ipaddress.ip_address(addr).version
-        return {4: socket.AF_INET, 6: socket.AF_INET6}.get(version, socket.AF_INET)
+        return {
+            4: socket.AF_INET,
+            6: socket.AF_INET6}.get(
+            version,
+            socket.AF_INET)
+
 
 class Helper():
     """ Convenient helper for working with socket stuff. """
+
     def __init__(self, soc: socket, log_level: Union[str, LL] = None) -> None:
         """ Constructor for Helper """
         self.soc = soc
-        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
+        self.log_level = Util().as_enum(log_level) if isinstance(
+            log_level, str) else log_level
 
     def send(self, msg: any) -> None:
         """ Send data to another endpoint. """
@@ -165,11 +181,20 @@ class Helper():
             Util().message('crit', 'recvall - connection aborted.')
         return data
 
+
 class Server():
     """ Server class for serving Vapoursynth's clips. """
-    def __init__(self, host: str = None, port: int = 14322, clip: VideoNode = None, threads: int = 0, log_level: Union[str, LL] = 'info') -> None:
+
+    def __init__(self,
+                 host: str = None,
+                 port: int = 14322,
+                 clip: VideoNode = None,
+                 threads: int = 0,
+                 log_level: Union[str,
+                                  LL] = 'info') -> None:
         """ Constructor for Server. """
-        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
+        self.log_level = Util().as_enum(log_level) if isinstance(
+            log_level, str) else log_level
         if not isinstance(clip, VideoNode):
             Util().message('crit', 'argument "clip" has wrong type.')
             sys.exit(2)
@@ -177,7 +202,9 @@ class Server():
         self.threads = core.num_threads if threads == 0 else threads
         self.frame_queue_buffer = dict()
         self.client_connected = False
-        self.soc = socket.socket(Util().get_proto_version(host), socket.SOCK_STREAM)
+        self.soc = socket.socket(
+            Util().get_proto_version(host),
+            socket.SOCK_STREAM)
         self.soc.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         Util().message('info', 'socket created.')
         try:
@@ -189,21 +216,22 @@ class Server():
         self.soc.listen(2)
         Util().message('info', 'listening the socket.')
         while True:
-                conn, addr = self.soc.accept()
-                ip, port = str(addr[0]), str(addr[1])
-                Util().message('info', f'accepting connection from {ip}:{port}.')
-                try:
-                    if not self.client_connected:
-                        self.conn = conn
-                        self.client_connected = True
-                        Thread(target=self.server_loop, args=(ip, port)).start()
-                    else:
-                        Helper(conn, self.log_level).send(pickle.dumps('busy'))
-                        Util().message('info', 'client already connected, server busy!')
-                        conn.close()
-                        Util().message('info', f'connection {ip}:{port} closed.')
-                except:
-                    Util().message('crit', f'can\'t start main server loop! {sys.exc_info()}')
+            conn, addr = self.soc.accept()
+            ip, port = str(addr[0]), str(addr[1])
+            Util().message('info', f'accepting connection from {ip}:{port}.')
+            try:
+                if not self.client_connected:
+                    self.conn = conn
+                    self.client_connected = True
+                    Thread(target=self.server_loop, args=(ip, port)).start()
+                else:
+                    Helper(conn, self.log_level).send(pickle.dumps('busy'))
+                    Util().message('info', 'client already connected, server busy!')
+                    conn.close()
+                    Util().message('info', f'connection {ip}:{port} closed.')
+            except BaseException:
+                Util().message(
+                    'crit', f'can\'t start main server loop! {sys.exc_info()}')
         self.soc.close()
 
     def server_loop(self, ip: str, port: int) -> None:
@@ -213,12 +241,14 @@ class Server():
             input = self.helper.recv()
             try:
                 query = pickle.loads(input)
-            except:
+            except BaseException:
                 query = dict(type=Action.CLOSE)
             query_type = query['type']
             if query_type == Action.VERSION:
                 Util().message('debug', f'requested TCPClip version.')
-                self.helper.send(pickle.dumps((Version.MAJOR, Version.MINOR, Version.BUGFIX)))
+                self.helper.send(
+                    pickle.dumps(
+                        (Version.MAJOR, Version.MINOR, Version.BUGFIX)))
                 Util().message('debug', f'TCPClip version sent.')
             elif query_type == Action.CLOSE:
                 self.helper.send(pickle.dumps('close'))
@@ -234,7 +264,8 @@ class Server():
                 self.helper.send(pickle.dumps('exit'))
                 self.conn.close()
                 self.client_connected = False
-                Util().message('info', f'connection {ip}:{port} closed. Exiting, as client asked.')
+                Util().message(
+                    'info', f'connection {ip}:{port} closed. Exiting, as client asked.')
                 os._exit(0)
                 return
             elif query_type == Action.HEADER:
@@ -248,7 +279,8 @@ class Server():
             else:
                 self.conn.close()
                 self.client_connected = False
-                Util().message('warn', f'received query has unknown type. Connection {ip}:{port} closed.')
+                Util().message(
+                    'warn', f'received query has unknown type. Connection {ip}:{port} closed.')
                 return
 
     def get_meta(self) -> None:
@@ -258,23 +290,23 @@ class Server():
         self.helper.send(
             pickle.dumps(
                 dict(
-                    format = dict(
-                        id = clip.format.id, 
-                        name = clip.format.name,
-                        color_family = int(clip.format.color_family), 
-                        sample_type = int(clip.format.sample_type), 
-                        bits_per_sample = clip.format.bits_per_sample, 
-                        bytes_per_sample = clip.format.bytes_per_sample, 
-                        subsampling_w = clip.format.subsampling_w, 
-                        subsampling_h = clip.format.subsampling_h, 
-                        num_planes = clip.format.num_planes
-                    ), 
-                    width = clip.width, 
-                    height = clip.height, 
-                    num_frames = clip.num_frames, 
-                    fps_numerator = clip.fps.numerator, 
-                    fps_denominator = clip.fps.denominator,
-                    props = props
+                    format=dict(
+                        id=clip.format.id,
+                        name=clip.format.name,
+                        color_family=int(clip.format.color_family),
+                        sample_type=int(clip.format.sample_type),
+                        bits_per_sample=clip.format.bits_per_sample,
+                        bytes_per_sample=clip.format.bytes_per_sample,
+                        subsampling_w=clip.format.subsampling_w,
+                        subsampling_h=clip.format.subsampling_h,
+                        num_planes=clip.format.num_planes
+                    ),
+                    width=clip.width,
+                    height=clip.height,
+                    num_frames=clip.num_frames,
+                    fps_numerator=clip.fps.numerator,
+                    fps_denominator=clip.fps.denominator,
+                    props=props
                 )
             )
         )
@@ -283,13 +315,15 @@ class Server():
         """ Query arbitrary frame and send it to Client. """
         try:
             usable_requests = min(self.threads, get_usable_cpus_count())
-        except:
+        except BaseException:
             usable_requests = self.threads
         for pf in range(min(usable_requests, self.clip.num_frames - frame)):
             frame_to_pf = int(frame + pf)
             if frame_to_pf not in self.frame_queue_buffer:
-                self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(frame_to_pf)
-                Util().message('debug', f'get_frame_async({frame_to_pf}) called at get_frame({frame}).')
+                self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(
+                    frame_to_pf)
+                Util().message(
+                    'debug', f'get_frame_async({frame_to_pf}) called at get_frame({frame}).')
         out_frame = self.frame_queue_buffer.pop(frame).result()
         frame_data = [np.asarray(plane) for plane in out_frame.planes()]
         if not pipe:
@@ -299,24 +333,36 @@ class Server():
             self.helper.send(pickle.dumps(frame_data))
         del out_frame
 
+
 class Client():
     """ Client class for retrieving Vapoursynth clips. """
-    def __init__(self, host: str, port: int = 14322, log_level: str = 'info', shutdown: bool = False) -> None:
+
+    def __init__(
+            self,
+            host: str,
+            port: int = 14322,
+            log_level: str = 'info',
+            shutdown: bool = False) -> None:
         """ Constructor for Client. """
-        self.log_level = Util().as_enum(log_level) if isinstance(log_level, str) else log_level
+        self.log_level = Util().as_enum(log_level) if isinstance(
+            log_level, str) else log_level
         self.shutdown = shutdown
-        self._stop = False # workaround for early interrupt
+        self._stop = False  # workaround for early interrupt
         try:
-            self.soc = socket.socket(Util().get_proto_version(host), socket.SOCK_STREAM)
+            self.soc = socket.socket(
+                Util().get_proto_version(host),
+                socket.SOCK_STREAM)
             self.soc.connect((host, port))
             self.helper = Helper(self.soc, self.log_level)
         except ConnectionRefusedError:
-            Util().message('crit', 'connection time-out reached. Probably closed port or server is down.')
+            Util().message(
+                'crit',
+                'connection time-out reached. Probably closed port or server is down.')
             sys.exit(2)
 
     def __del__(self) -> None:
         """ Destructor for Client. """
-        if self.shutdown: # kill server on exit
+        if self.shutdown:  # kill server on exit
             self.exit()
 
     def query(self, data: dict) -> Any:
@@ -328,7 +374,7 @@ class Client():
                 Util().message('crit', f'server is busy.')
                 sys.exit(2)
             return answer
-        except:
+        except BaseException:
             Util().message('crit', f'failed to make query {data}.')
             sys.exit(2)
 
@@ -351,14 +397,15 @@ class Client():
             self.query(dict(type=Action.EXIT))
             self.soc.close()
             sys.exit(code)
-        except:
+        except BaseException:
             pass
 
     def get_meta(self) -> dict:
         """ Wrapper for requesting clip's info. """
         return self.query(dict(type=Action.HEADER))
 
-    def get_frame(self, frame: int, pipe: bool = False) -> Union[Tuple[list, dict], list]:
+    def get_frame(self, frame: int,
+                  pipe: bool = False) -> Union[Tuple[list, dict], list]:
         """ Wrapper for requesting arbitrary frame from the Server. """
         return self.query(dict(type=Action.FRAME, frame=frame, pipe=pipe))
 
@@ -377,7 +424,8 @@ class Client():
             csp = f'{y}{u}{v}'
         else:
             csp = None
-        return {1: f'Cmono{bits}', 3: f'C{csp}p{bits}'}.get(clip_format['num_planes'], 'C420p8')
+        return {1: f'Cmono{bits}', 3: f'C{csp}p{bits}'}.get(
+            clip_format['num_planes'], 'C420p8')
 
     def sigint_handler(self, *args) -> None:
         """ Handle "to_stdout()"'s cancelation. """
@@ -389,7 +437,9 @@ class Client():
             start = time.perf_counter()
         server_version = self.version()
         if server_version != Version.MAJOR:
-            Util().message('crit', f'version mismatch!\nServer: {server_version} | Client: {Version.MAJOR}')
+            Util().message(
+                'crit',
+                f'version mismatch!\nServer: {server_version} | Client: {Version.MAJOR}')
             self.exit(2)
         header_info = self.get_meta()
         if len(header_info) == 0:
@@ -419,20 +469,25 @@ class Client():
         fps_num = header_info['fps_numerator']
         fps_den = header_info['fps_denominator']
         csp = self.get_y4m_csp(clip_format)
-        sys.stdout.buffer.write(bytes(f'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frameType} A{sar_num}:{sar_den} {csp} XYSCSS={csp} XLENGTH={num_frames}\n', 'UTF-8'))
+        sys.stdout.buffer.write(
+            bytes(
+                f'YUV4MPEG2 W{width} H{height} F{fps_num}:{fps_den} I{frameType} A{sar_num}:{sar_den} {csp} XYSCSS={csp} XLENGTH={num_frames}\n',
+                'UTF-8'))
         signal.signal(signal.SIGINT, self.sigint_handler)
         for frame_number in range(num_frames):
             if self._stop:
                 break
             if self.log_level >= LL.Info:
                 frameTime = time.perf_counter()
-                eta = (frameTime - start) * (num_frames - (frame_number+1)) / ((frame_number+1))
+                eta = (frameTime - start) * (num_frames -
+                                             (frame_number + 1)) / ((frame_number + 1))
             frame_data = self.get_frame(frame_number, pipe=True)
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
             for plane in frame_data:
                 sys.stdout.buffer.write(plane)
             if self.log_level >= LL.Info:
-                sys.stderr.write(f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
+                sys.stderr.write(
+                    f'Processing {frame_number}/{num_frames} ({frame_number/frameTime:.003f} fps) [{float(100 * frame_number / num_frames):.1f} %] [ETA: {int(eta//3600):d}:{int((eta//60)%60):02d}:{int(eta%60):02d}]  \r')
 
     def as_source(self) -> VideoNode:
         """ Expose Client as source filter for Vapoursynth. """
@@ -449,8 +504,20 @@ class Client():
         header_info = self.get_meta()
         assert len(header_info) > 0, 'Wrong header info.'
         assert 'format' in header_info, 'Missing "Format".'
-        clip_format  = header_info['format']
-        source_format = core.register_format(clip_format['color_family'], clip_format['sample_type'], clip_format['bits_per_sample'], clip_format['subsampling_w'], clip_format['subsampling_h'])
-        dummy = core.std.BlankClip(width=header_info['width'], height=header_info['height'], format=source_format, length=header_info['num_frames'], fpsnum=header_info['fps_numerator'], fpsden=header_info['fps_denominator'], keep=True)
+        clip_format = header_info['format']
+        source_format = core.register_format(
+            clip_format['color_family'],
+            clip_format['sample_type'],
+            clip_format['bits_per_sample'],
+            clip_format['subsampling_w'],
+            clip_format['subsampling_h'])
+        dummy = core.std.BlankClip(
+            width=header_info['width'],
+            height=header_info['height'],
+            format=source_format,
+            length=header_info['num_frames'],
+            fpsnum=header_info['fps_numerator'],
+            fpsden=header_info['fps_denominator'],
+            keep=True)
         source = core.std.ModifyFrame(dummy, dummy, frame_copy)
         return source
