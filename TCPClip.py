@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.3.0
+# Version 2.3.1
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -45,6 +45,7 @@
 from vapoursynth import core, VideoNode, VideoFrame # pylint: disable=no-name-in-module
 import numpy as np
 import socket
+from socket import AddressFamily # pylint: disable=no-name-in-module
 import sys
 import os
 import time
@@ -119,7 +120,7 @@ class Util(object):
         if self.as_enum(parrent_level) >= Util().as_enum(level):
             print(f'{facility:6s} [{level}]: {text}', file=sys.stderr)
 
-    def get_proto_version(self, addr: str):
+    def get_proto_version(self, addr: str) -> AddressFamily:
         if addr[0] == '[' and addr[-1] == ']':
             addr = addr[1:-1]
         version = ipaddress.ip_address(addr).version
