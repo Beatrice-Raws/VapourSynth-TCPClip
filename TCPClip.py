@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.3.1
+# Version 2.3.2
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -70,7 +70,7 @@ except BaseException:
 class Version(object):
     MAJOR = 2
     MINOR = 3
-    BUGFIX = 0
+    BUGFIX = 2
 
 
 class Action(Enum):
