@@ -7,7 +7,7 @@ Python class for distributed video processing and encoding
 ```python
 from TCPClip import Server
 <your vpy code>
-Server('<ip addr>', 14322, get_output(), threads=8, log_level='info')
+Server('<ip addr>', 14322, get_output(), threads=8, log_level='info', compression_method=None, compression_level=1, compression_threads=1)
 ```
 
 #### Batches
