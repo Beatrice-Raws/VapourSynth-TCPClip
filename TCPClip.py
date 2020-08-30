@@ -40,7 +40,7 @@
 #
 #   Notice: frame properties will be also copied.
 #   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server when closing Client.
-#   Notice No.3: Compression threads are 1 by default, so no threadpoll at all. You can set it to 0 and we will use half of script threads or set your own value (min 2 workers).
+#   Notice No.3: Compression threads are 1 by default, so no threadpool at all. You can set it to 0 and we will use half of script threads or set your own value (min 2 workers).
 #
 
 from vapoursynth import core, VideoNode, VideoFrame  # pylint: disable=no-name-in-module
