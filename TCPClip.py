@@ -1,5 +1,5 @@
 # TCPClip Class by DJATOM
-# Version 2.3.2
+# Version 2.4.0
 # License: MIT
 # Why? Mainly for processing on server 1 and encoding on server 2, but it's also possible to distribute filtering chain.
 #
@@ -7,7 +7,7 @@
 #   Server side:
 #       from TCPClip import Server
 #       <your vpy code>
-#       Server('<ip addr>', <port>, get_output(), <threads>, <verbose>)
+#       Server('<ip addr>', <port>, get_output(), <threads>, <verbose>, <compression_method>, <compression_level>, <compression_threads>)
 #   Batches:
 #       py EP01.py
 #       py EP02.py
@@ -39,7 +39,8 @@
 #       vspipe -y EP12.vpy - | x264 ... --demuxer "y4m" --output "EP12.264" -
 #
 #   Notice: frame properties will be also copied.
-#   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server at the last frame.
+#   Notice No.2: If you're previewing your script, set shutdown=False. That will not call shutdown of Server when closing Client.
+#   Notice No.3: Compression threads are 1 by default, so no threadpoll at all. You can set it to 0 and we will use half of script threads or set your own value (min 2 workers).
 #
 
 from vapoursynth import core, VideoNode, VideoFrame  # pylint: disable=no-name-in-module
@@ -55,6 +56,7 @@ import signal
 import ipaddress
 import struct
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum, IntEnum
 from typing import cast, Any, Union, List, Tuple
 
@@ -66,11 +68,17 @@ try:
 except BaseException:
     pass
 
+try:
+    import lzo
+    lzo_imported = True
+except BaseException:
+    lzo_imported = False
+
 
 class Version(object):
     MAJOR = 2
-    MINOR = 3
-    BUGFIX = 2
+    MINOR = 4
+    BUGFIX = 0
 
 
 class Action(Enum):
@@ -90,6 +98,7 @@ class LL(IntEnum):
 
 class Util(object):
     """ Various utilities for Server and Client. """
+
     def __new__(cls):
         """ Instantiate Utils as Singleton object """
         if not hasattr(cls, 'instance'):
@@ -124,7 +133,7 @@ class Util(object):
         return level
 
     def message(self, level: str, text: str) -> None:
-        """ Output log message according log level. """
+        """ Output log message according to log level. """
         facility, parrent_level = self.get_caller()
         if self.as_enum(parrent_level) >= Util().as_enum(level):
             print(f'{facility:6s} [{level}]: {text}', file=sys.stderr)
@@ -190,17 +199,35 @@ class Server():
                  port: int = 14322,
                  clip: VideoNode = None,
                  threads: int = 0,
-                 log_level: Union[str,
-                                  LL] = 'info') -> None:
+                 log_level: Union[str, LL] = 'info',
+                 compression_method: str = None,
+                 compression_level: int = 0,
+                 compression_threads: int = 1) -> None:
         """ Constructor for Server. """
         self.log_level = Util().as_enum(log_level) if isinstance(
             log_level, str) else log_level
+        self.compression_method = compression_method
+        self.compression_level = compression_level
+        self.compression_threads = compression_threads
         if not isinstance(clip, VideoNode):
             Util().message('crit', 'argument "clip" has wrong type.')
             sys.exit(2)
-        self.clip = clip
+        if self.compression_method != None:
+            self.compression_method = self.compression_method.lower()
+            if self.compression_method == 'lzo' and not lzo_imported:
+                Util().message('warn',
+                               'compression set to LZO but LZO module is not available. Disabling compression.')
+                self.compression_method = None
         self.threads = core.num_threads if threads == 0 else threads
+        if self.compression_threads == 0:
+            self.compression_threads = self.threads // 2
+        if self.compression_threads != 1:
+            self.compression_pool = ThreadPoolExecutor(
+                max_workers=max(self.compression_threads, 2))
+        self.clip = clip
         self.frame_queue_buffer = dict()
+        self.cframe_queue_buffer = dict()
+        self.last_queued_frame = -1
         self.client_connected = False
         self.soc = socket.socket(
             Util().get_proto_version(host),
@@ -306,32 +333,76 @@ class Server():
                     num_frames=clip.num_frames,
                     fps_numerator=clip.fps.numerator,
                     fps_denominator=clip.fps.denominator,
-                    props=props
+                    props=props,
+                    compression_method=self.compression_method
                 )
             )
         )
+
+    def execute_parallel_lzo(self, frame: int = 0, pipe: bool = False):
+        """ Compress frames using LZO method. """
+        Util().message(
+            'debug', f'execute_parallel_lzo({frame}) called.')
+        try:
+            out_frame = self.frame_queue_buffer.pop(frame).result()
+        except KeyError:
+            out_frame = self.clip.get_frame_async(frame).result()
+            self.last_queued_frame = frame
+        frame_data = []
+        for plane in out_frame.planes():
+            frame_data.append(np.asarray(plane))
+        frame_data = lzo.compress(pickle.dumps(
+            frame_data), self.compression_level)
+        if pipe:
+            return frame_data
+        else:
+            frame_props = dict(out_frame.props)
+            return frame_data, frame_props
 
     def get_frame(self, frame: int = 0, pipe: bool = False) -> None:
         """ Query arbitrary frame and send it to Client. """
         try:
             usable_requests = min(self.threads, get_usable_cpus_count())
+            usable_compression_requests = min(
+                self.compression_threads, get_usable_cpus_count())
         except BaseException:
             usable_requests = self.threads
+            usable_compression_requests = self.compression_threads
         for pf in range(min(usable_requests, self.clip.num_frames - frame)):
             frame_to_pf = int(frame + pf)
-            if frame_to_pf not in self.frame_queue_buffer:
+            if frame_to_pf not in self.frame_queue_buffer and self.last_queued_frame < frame_to_pf:
                 self.frame_queue_buffer[frame_to_pf] = self.clip.get_frame_async(
                     frame_to_pf)
+                self.last_queued_frame = frame_to_pf
                 Util().message(
                     'debug', f'get_frame_async({frame_to_pf}) called at get_frame({frame}).')
-        out_frame = self.frame_queue_buffer.pop(frame).result()
-        frame_data = [np.asarray(plane) for plane in out_frame.planes()]
-        if not pipe:
+        if self.compression_method == 'lzo':
+            if self.compression_threads != 1:
+                for cpf in range(min(usable_compression_requests, self.clip.num_frames - frame)):
+                    frame_to_pf = int(frame + cpf)
+                    if frame_to_pf not in self.cframe_queue_buffer:
+                        self.cframe_queue_buffer[frame_to_pf] = self.compression_pool.submit(
+                            self.execute_parallel_lzo, frame_to_pf, pipe)
+                if pipe:
+                    frame_data = self.cframe_queue_buffer.pop(frame).result()
+                else:
+                    frame_data, frame_props = self.cframe_queue_buffer.pop(
+                        frame).result()
+        if self.compression_method == None or self.compression_threads == 1:
+            try:
+                out_frame = self.frame_queue_buffer.pop(frame).result()
+            except KeyError:
+                out_frame = self.clip.get_frame_async(frame).result()
+                self.last_queued_frame = frame
+            frame_data = [np.asarray(plane) for plane in out_frame.planes()]
             frame_props = dict(out_frame.props)
-            self.helper.send(pickle.dumps((frame_data, frame_props)))
-        else:
+        if self.compression_method == 'lzo' and self.compression_threads == 1:
+            frame_data = lzo.compress(pickle.dumps(
+                frame_data), self.compression_level)
+        if pipe:
             self.helper.send(pickle.dumps(frame_data))
-        del out_frame
+        else:
+            self.helper.send(pickle.dumps((frame_data, frame_props)))
 
 
 class Client():
@@ -347,6 +418,7 @@ class Client():
         self.log_level = Util().as_enum(log_level) if isinstance(
             log_level, str) else log_level
         self.shutdown = shutdown
+        self.compression_method = None
         self._stop = False  # workaround for early interrupt
         try:
             self.soc = socket.socket(
@@ -402,7 +474,14 @@ class Client():
 
     def get_meta(self) -> dict:
         """ Wrapper for requesting clip's info. """
-        return self.query(dict(type=Action.HEADER))
+        meta = self.query(dict(type=Action.HEADER))
+        if meta['compression_method'] == 'lzo':
+            if not lzo_imported:
+                raise ValueError(
+                    'got LZO compression from the Server but we can\'t decompress that since no LZO module loaded. Unable to continue.')
+            else:
+                self.compression_method = meta['compression_method']
+        return meta
 
     def get_frame(self, frame: int,
                   pipe: bool = False) -> Union[Tuple[list, dict], list]:
@@ -482,6 +561,8 @@ class Client():
                 eta = (frameTime - start) * (num_frames -
                                              (frame_number + 1)) / ((frame_number + 1))
             frame_data = self.get_frame(frame_number, pipe=True)
+            if self.compression_method == 'lzo':
+                frame_data = pickle.loads(lzo.decompress(frame_data))
             sys.stdout.buffer.write(bytes('FRAME\n', 'UTF-8'))
             for plane in frame_data:
                 sys.stdout.buffer.write(plane)
@@ -494,6 +575,8 @@ class Client():
         def frame_copy(n: int, f: VideoFrame) -> VideoFrame:
             fout = f.copy()
             frame_data, frame_props = self.get_frame(n, pipe=False)
+            if self.compression_method == 'lzo':
+                frame_data = pickle.loads(lzo.decompress(frame_data))
             for p in range(fout.format.num_planes):
                 np.asarray(fout.get_write_array(p))[:] = frame_data[p]
             for i in frame_props:
